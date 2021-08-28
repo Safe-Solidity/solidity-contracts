@@ -96,7 +96,7 @@ contract Isolde {
     }
     
     function buyback(uint256 ethAmount, uint256 tokenAmount) public onlyOwner {
-        require(address(this).balance >= 0.01 ether, 'balance for min threshold not met');
+        require(address(this).balance >= 1 ether, 'balance for min threshold not met');
         require(address(this).balance >= ethAmount, 'low balance');
         require(token != address(0), 'buyback address not set');
 
