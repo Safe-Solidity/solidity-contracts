@@ -3,7 +3,6 @@ pragma solidity ^0.8.6;
 // SPDX-License-Identifier: Apache-2.0
 
 import "./UniswapRouter.sol";
-import "./Subscription.sol";
 
 contract Isolde {
     
@@ -12,8 +11,16 @@ contract Isolde {
         _;
     }
     
+    // tier struct
+    struct Tier {
+        string name;
+        uint8 level;
+        uint256 price;
+    }
+    
     // events
-    event WinnerSelected(address winner);
+    event Subscribed(address wallet, uint8 level, uint256 time);
+    event Buyback();
 
     // router
     IUniswapV2Router public router;
@@ -25,13 +32,8 @@ contract Isolde {
     address payable public treasury;
     address private _owner;
     
-    // tiering
-    uint private TIER_MULTIPLIER = 5;
-    Subscription.Tier[] private _tiers;
-    
-    // subs
-    address[] private _subs;
-    mapping (address => Subscription.Subscriber) private _subsMap;
+    // subs and tiers
+    Tier[] private _tiers;
     uint public lastSubTime = block.timestamp;
 
     
@@ -43,97 +45,41 @@ contract Isolde {
         treasury = treasuryAddress;
     }
     
-    function getSubCount() public view returns (uint256) {
-        return _subs.length;
-    }
-    
-    function setTiers(Subscription.Tier[] memory tiers) public onlyOwner {
+    function setTiers(Tier[] memory tiers) public onlyOwner {
         delete _tiers;
         
         for (uint i = 0; i < tiers.length; ++i) {
-            Subscription.Tier memory tier = tiers[i];
-            _tiers.push(Subscription.Tier(tier.name, tier.level, tier.price));
+            Tier memory tier = tiers[i];
+            _tiers.push(Tier(tier.name, tier.level, tier.price));
         }
     }
 
-    function getTiers() public view returns (Subscription.Tier[] memory) {
+    function getTiers() public view returns (Tier[] memory) {
         return _tiers;
     }
     
     function viewTier(uint level) public view returns (string memory, uint, uint) {
         require(level > 0 && level <= _tiers.length, 'wrong tier');
-        Subscription.Tier memory tier = _tiers[level - 1];
+        Tier memory tier = _tiers[level - 1];
         return (tier.name, tier.level, tier.price);
     }
     
-    function viewSub(address wallet) public view returns (address, uint, uint) {
-        Subscription.Subscriber memory sub = _subsMap[wallet];
-        return (sub.wallet, sub.tier, sub.expiration);
-    }
-    
-    function getSubs() public view returns (address[] memory) {
-        return _subs;
-    }
-    
-    function _viewSub(address wallet) internal view returns (Subscription.Subscriber memory) {
-        return _subsMap[wallet];
-    }
-    
-    function subscribe(address who, uint level) public payable { // since who isn't msg.sender someone can possibly gift a subscribtion
+    function subscribe(address who, uint8 level) public payable { // since who isn't msg.sender someone can possibly gift a subscribtion
         require(level > 0 && level <= _tiers.length, 'wrong tier');
         require(msg.value == _tiers[level - 1].price, 'sent ether is different from tier price');
         
-        Subscription.Subscriber memory sub = _subsMap[who];
-        
-        require(level >= sub.tier, 'tier downgrade is not allowed');
-        
-        uint extraTime = 0; // in seconds;
-        
-        if (sub.tier == level) {
-            extraTime = sub.expiration - block.timestamp;
-        } else if (sub.expiration > block.timestamp) { // sub.expiration defaults to 0 for new subscribers
-            extraTime = _convertRemaining(sub, level);
-        }
-
-        uint expiration = block.timestamp + (30 days) + extraTime;
-        
-        sub = Subscription.Subscriber(who, level, expiration);
-        
-        if (_subsMap[who].wallet == address(0)) {
-            _subs.push(who);
-        }
-        
-        _subsMap[who] = sub;
-        
         lastSubTime = block.timestamp;
+        emit Subscribed(who, level, 30);
     }
     
-    function giftSubscription(address who, uint level) public onlyOwner {
-        require(level > 0 && level <= _tiers.length, 'wrong tier');
-        require(_subsMap[who].wallet == address(0), 'user is already subscribed');
-        
-        uint expiration = block.timestamp + (30 days);
-        
-        Subscription.Subscriber memory sub = Subscription.Subscriber(who, level, expiration);
-        
-        _subs.push(who);
-        _subsMap[who] = sub;
-        
-         lastSubTime = block.timestamp;
-    }
-    
-    function _convertRemaining(Subscription.Subscriber memory sub, uint level) private view returns (uint) {
-        return (sub.expiration - block.timestamp) / ((level - sub.tier) * TIER_MULTIPLIER);
-    }
-    
-    function _swapEthForTokens(uint256 amount) private {
+    function _swapEthForTokens(uint256 ethAmount, uint256 tokenAmount) private {
         address[] memory path = new address[](2);
         
         path[0] = router.WETH();
         path[1] = token;
 
-        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: amount} (
-            0,
+        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: ethAmount} (
+            tokenAmount,
             path,
             address(DEAD_ADDRESS),
             block.timestamp
@@ -149,67 +95,20 @@ contract Isolde {
         _sendEthToTreasury(address(this).balance);
     }
     
-    function _getRandom(uint max) private view returns (uint) {
-        return uint(keccak256(abi.encodePacked(block.timestamp, block.difficulty, max))) % max;
-    }
-    
-    
-    function pickWinner() public view returns (address wallet) {
-        require(_subs.length > 0, 'no subs to pick from');
-
-        uint random = _getRandom(_subs.length);
-        
-        return _subs[random];
-    }
-    
-    function _deliverGiftToWinner(address wallet) private {
-        Subscription.Subscriber memory winner = _subsMap[wallet];
-        
-        uint added =  14 days;
-        
-        if (winner.tier < _tiers.length) {
-            // free tier up
-            winner.tier += 1;
-            added /= 2;
-        }
-            
-        // add free days
-        winner.expiration = winner.expiration + added;
-        
-        _subsMap[winner.wallet] = winner;
-        
-        emit WinnerSelected(wallet);
-    }
-    
-    function buyback() public onlyOwner {
-        require(address(this).balance >= 1 ether, 'low balance');
+    function buyback(uint256 ethAmount, uint256 tokenAmount) public onlyOwner {
+        require(address(this).balance >= 0.01 ether, 'balance for min threshold not met');
+        require(address(this).balance >= ethAmount, 'low balance');
         require(token != address(0), 'buyback address not set');
-        
-        removeExpired();
-        
-        address winner = pickWinner();
-        _deliverGiftToWinner(winner);
-        
-        uint256 amount = 1 ether;
-        uint256 fee = amount * platformFee / 100;
-        amount = amount - fee;
-        
-        _swapEthForTokens(amount);
-        _sendEthToTreasury(fee);
-    }
-    
-    function removeExpired() public {
-        address[] memory subs = _subs;
-        delete _subs;
 
-        for (uint i = 0; i < subs.length; i++) {
-            if (block.timestamp >= _subsMap[subs[i]].expiration) {
-                delete _subsMap[subs[i]];
-            } else {
-                _subs.push(subs[i]);
-            }
-        }
+        uint256 fee = ethAmount * platformFee / 100;
+        ethAmount = ethAmount - fee;
+        
+        _swapEthForTokens(ethAmount, tokenAmount);
+        _sendEthToTreasury(fee);
+        
+        emit Buyback();
     }
+
     
     function setRouter(address payable newRouter) public onlyOwner {
         router = IUniswapV2Router(newRouter);
@@ -228,6 +127,5 @@ contract Isolde {
         platformFee = newFee;
     }
     
-    fallback() external { }
-    
+    receive() external payable {}
 }
