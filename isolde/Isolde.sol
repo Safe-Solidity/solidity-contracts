@@ -20,13 +20,14 @@ contract Isolde {
     
     // events
     event Subscribed(address wallet, uint8 level, uint256 time);
-    event Buyback();
+    event Buyback(uint256 ethAmount, uint256 tokenAmount);
+    event Beacon(uint256 timestamp);
 
     // router
     IUniswapV2Router public router;
     
-    // addresses & fees
-    uint public platformFee = 30;
+    // addresses & allocation
+    uint public platformAllocation = 30;
     address private DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD; 
     address public token;
     address payable public treasury;
@@ -100,13 +101,17 @@ contract Isolde {
         require(address(this).balance >= ethAmount, 'low balance');
         require(token != address(0), 'buyback address not set');
 
-        uint256 fee = ethAmount * platformFee / 100;
-        ethAmount = ethAmount - fee;
+        uint256 treasuryAllocation = ethAmount * platformAllocation / 100;
+        ethAmount = ethAmount - treasuryAllocation;
         
         _swapEthForTokens(ethAmount, tokenAmount);
-        _sendEthToTreasury(fee);
+        _sendEthToTreasury(treasuryAllocation);
         
-        emit Buyback();
+        emit Buyback(ethAmount, tokenAmount);
+    }
+    
+    function sendBeacon() public onlyOwner {
+        emit Beacon(block.timestamp);
     }
 
     
@@ -122,9 +127,10 @@ contract Isolde {
         treasury = newTreasury;
     }
     
-    function setPlatformFee(uint newFee) public onlyOwner {
-        require(newFee <= 30, 'maximum fee exceeded');
-        platformFee = newFee;
+    function setPlatformAllocation(uint newAllocation) public onlyOwner {
+        require(newAllocation > 0, 'platform allocation should be greater than 0');
+        require(newAllocation <= 90, 'maximum allocation exceeded');
+        platformAllocation = newAllocation;
     }
     
     receive() external payable {}
