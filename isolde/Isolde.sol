@@ -27,7 +27,7 @@ contract Isolde {
     IUniswapV2Router public router;
     
     // addresses & allocation
-    uint public platformAllocation = 30;
+    uint public revenueAllocation = 30;
     address private DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD; 
     address public token;
     address payable public treasury;
@@ -101,7 +101,7 @@ contract Isolde {
         require(address(this).balance >= ethAmount, 'low balance');
         require(token != address(0), 'buyback address not set');
 
-        uint256 treasuryAllocation = ethAmount * platformAllocation / 100;
+        uint256 treasuryAllocation = ethAmount * revenueAllocation / 100;
         ethAmount = ethAmount - treasuryAllocation;
         
         _swapEthForTokens(ethAmount, tokenAmount);
@@ -127,10 +127,10 @@ contract Isolde {
         treasury = newTreasury;
     }
     
-    function setPlatformAllocation(uint newAllocation) public onlyOwner {
-        require(newAllocation > 0, 'platform allocation should be greater than 0');
+    function setRevenueAllocation(uint newAllocation) public onlyOwner {
+        require(newAllocation > 0, 'revenue allocation should be greater than 0');
         require(newAllocation <= 90, 'maximum allocation exceeded');
-        platformAllocation = newAllocation;
+        revenueAllocation = newAllocation;
     }
     
     receive() external payable {}
