@@ -113,7 +113,6 @@ contract Isolde {
     function sendBeacon() public onlyOwner {
         emit Beacon(block.timestamp);
     }
-
     
     function setRouter(address payable newRouter) public onlyOwner {
         router = IUniswapV2Router(newRouter);
